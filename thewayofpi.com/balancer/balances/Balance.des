@@ -1,0 +1,180 @@
+balance package description
+
+type (
+	Result		byte
+	Lexem		byte
+	Weight		int
+	Delta		int
+)
+
+const (
+	NONE	Result = '?'
+	EQUAL	Result = '='
+	LESS	Result = '<'
+	GREATER	Result = '>'
+)
+
+const (
+	OPEN	Lexem = '('
+	CLOSE	Lexem = ')'
+	COORD	Lexem = '#'
+	POINT	Lexem = '.'
+	NUMBER	Lexem = 'N'
+	DIMEN	Lexem = 'D'
+)
+
+type (
+
+	Token struct {
+		Id		Lexem
+		Value	Point
+	}
+
+	Point struct {
+		Force	Weight
+		Place	[]Delta
+	}
+
+	Balance struct {
+		dimension	byte
+		leaves		byte
+		deep		byte
+		weight		Weight
+		result		[]Result
+		points		[]Point
+		children	[]*Balance
+	}
+)
+
+var dimen = [32]uint8 {
+	0, 1, 1, 1, 1, 1, 1, 1,
+	2, 2, 2, 2, 2, 2, 2, 2,
+	2, 2, 2, 2, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3,
+}
+
+var levels = [32]uint8 {
+	0, 1, 2, 2, 3, 3, 4, 4,
+	2, 2, 2, 2, 3, 3, 3, 3,
+	4, 4, 4, 4, 2, 2, 2, 2,
+	2, 2, 2, 2, 3, 3, 3, 3,
+}
+
+var vals = [32]uint8 {
+	 0,  2,  3,  4,  5,  6,  7,  8,
+	 9,  9,  9,  9, 10, 10, 10, 10,
+	11, 11, 11, 11, 12, 12, 12, 12,
+	13, 13, 13, 13, 14, 14, 14, 14,
+}
+
+public specification:
+
+	New(dimension, leaves, deep byte) *Balance, error
+		// dimension: Number of axis
+		// leaves: Total number of weights to place
+		// levels: Max deep of generated tree
+	{
+		// dis := distribute(deep, leaves)
+		// hang := make([]hangers, len(dis))
+		// for i := len(dis)-1; i >= 0; i--
+		{
+			hang[i] = buildHangers(dis[i]) ????
+		}
+	}
+
+	(balance *Balance) Evaluate(value []Weight) *Evaluation
+
+App Engine PropertyLoadSaver Interface:
+	(balance *Balance) Load(ps []datastore.Property) error
+	(balance *Balance) Save() ([]datastore.Property, error)
+
+private methods:
+	design
+	build
+	encode
+	decode
+
+patron:
+	R1.- B → dnC
+	R2.- C → (B)C
+	R3.- C → ε
+
+	B: Balance
+	d: dimenssion
+	n: number of single points
+	C: list of Children
+
+	First(d) = {d}
+	First(n) = {n}
+	First(() = {(}
+	First()) = {)}
+	First(B) = {d}		Follow(B) = {$)}
+	First(C) = {(ε}		Follow(C) = {$)}
+
+		(	)	d	n	$
+
+	B	error	error	R1	error	error
+
+	C	R2	R3	error	error	R3
+
+import "github.com/hishboy/gocommons/lang"
+// Stack:
+// func NewStack() *Stack
+// func (s *Stack) Len() int
+// func (s *Stack) Push(item interface{})
+// func (s *Stack) Pop() interface{}
+// func (s *Stack) Peek() interface{}
+
+// ------- Aho:
+input buffer: w$
+set ip to point to the first symbol of w;
+set X to the top stack symbol;
+while ( X != $ ) { // stack is not empty
+	if ( X is a ) pop the stack and advance ip;
+	else if ( X is a terminal ) error();
+	else if ( M [ X , a] is an error entry ) error();
+	else if ( M[X,a] = X → Y1Y2...Yk ) {
+		output the production X → Y1Y2...Yk;
+		pop the stack;
+		push Yk,Yk-1,...,Y1 onto the stack, with Y1 on top;
+	}
+	set X to the top stack symbol;
+}
+// -------
+
+type idSymbol byte
+const (
+	B	idSymbol = 'B'	// Balance
+	C	idSymbol = 'C'	// Children
+	E	idSymbol = '$'	// End of input
+	T	idSymbol = 'T'	// Terminal
+)
+var symbol struct {
+	id	idSymbol
+	token	*Token
+}
+var w []Token
+stack := NewStack()
+stack.Push(&symbol{E, nil})
+stack.Push(&symbol{B, nil})
+ip := 0
+X := stack.Peek()
+while X.idSymbol != E {
+	if X.idSymbol = T {
+		_ := stack.Pop()
+		ip++
+	}
+
+}
+
+spec:
+	B → ppPC
+	P → pP|ε
+	C → (cB)C|ε
+
+	B: Balance
+	p: single point
+	P: list of points
+	C: list of Children
+	c: coordinates
+

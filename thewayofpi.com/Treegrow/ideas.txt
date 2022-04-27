@@ -1,0 +1,64 @@
+Lista de Nodos raíz de árboles
+
+
+type pending struct {
+	todo	*list.List
+	done	*list.List
+}
+
+var treelist	[100]pending
+
+
+
+
+
+
+type link struct {
+	edge	*node
+	count	int
+}
+
+type node struct {
+	infodim	int
+	nedges	int
+	hooks	[4]link
+}
+
+
+for {
+	-- Leer canal
+	-- Si es 1,
+		- crear un nuevo espacio personal
+			* (Nodo D0 + Nodo D1)
+			* Poner contador en D1
+		- añadirlo a treelist
+	-- Ejecutar ciclo
+		Para cada dimensión
+			Para cada elemento e de la lista todo
+			Invocar e.doCycle (Decrementar el contador adecuado y reportar status)
+			Si el resultado es,
+			OpenUp:
+				Buscarle una madre
+				Pasarlo a la lista done
+			OpenDown:
+				Buscarle un hijo
+
+
+
+
+
+
+
+En un momento dado (T.up) un hipercubo Hk de infodim k
+alcanzará el estado de estabilidad.
+Entonces explotará conectándose a un hipercubo de una infodim k+1.
+
+Si en T.up existiera un hipercubo H’k+1 de infodim k+1
+con algún enganche libre, Hk se conecta en uno de ellos.
+
+En caso contrario, se genera un nuevo hipercubo Jk+1 y
+Hk se conecta en uno de sus enganches. Si además existiera
+H''k+2 con algún enganche libre, Jk+1 se conecta con él.
+
+
+	

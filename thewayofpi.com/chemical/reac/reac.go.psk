@@ -1,0 +1,525 @@
+package reac
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+)
+
+import (
+	"thewayofpi.com/buffer/logs"
+	"thewayofpi.com/buffer/random"
+	"thewayofpi.com/buffer/chemical/elmt"
+	"thewayofpi.com/buffer/chemical/mol"
+)
+
+const (
+	input               = -1
+	output              = -2
+	novalue             = -3
+	joinerCount         = 3
+	splitterCount       = 3
+)
+
+const (
+    polar   propId = iota
+    force
+    link
+)
+
+const (
+    split   opId = iota
+    join
+)
+
+type (
+    propId  int
+    opId    int
+)
+
+type (
+    React struct {
+        prop    propId
+        op      opId
+        matrix  matrix
+    }
+)
+
+type (
+	stageSeed   map[reactClass]uint
+	stageSquema []reactIdx
+)
+
+type (
+	plug struct {
+		idx int
+		pin int
+	}
+	reactor struct {
+		id  reactIdx
+		inp []int
+		out []int
+	}
+	stage []reactor
+	link  struct {
+		left   plug
+		right  plug
+		minLen uint
+		value  mol.Molecule
+	}
+	phase  []link
+	matrix struct {
+		stages []stage
+		phases []phase
+	}
+)
+
+var (
+	joinersList   = [...]reactIdx{PolarJoiner, ForceJoiner, LinkJoiner}
+	splittersList = [...]reactIdx{PolarSplitter, ForceSplitter, LinkSplitter}
+	classList = [...]reactClass{class1t1, class1t2, class2t1}
+	classMap = map[reactClass]reactClass{
+		class1t1: class1t1,
+		class1t2: class1t2,
+		class2t1: class2t1,
+	}
+)
+
+func PolarJoin(m0, m1 *mol.Molecule) (*mol.Molecule, int, error) {
+	if m, energy, err := join(m0, m1, PolarJoiner); err != nil {
+		return nil, 0, errors.New(fmt.Sprintf("chemical:PolarJoin - %v", err))
+	} else {
+		return m, energy, nil
+	}
+}
+
+func ForceJoin(m0, m1 *mol.Molecule) (*mol.Molecule, int, error) {
+	if m, energy, err := join(m0, m1, ForceJoiner); err != nil {
+		return nil, 0, errors.New(fmt.Sprintf("chemical:ForceJoin - %v", err))
+	} else {
+		return m, energy, nil
+	}
+}
+
+func LinkJoin(m0, m1 *mol.Molecule) (*mol.Molecule, int, error) {
+	if m, energy, err := join(m0, m1, LinkJoiner); err != nil {
+		return nil, 0, errors.New(fmt.Sprintf("chemical:LinkJoin - %v", err))
+	} else {
+		return m, energy, nil
+	}
+}
+
+func join(m0, m1 *mol.Molecule, joiner reactIdx) (*mol.Molecule, int, error) {
+	if m0.IsNull() || m1.IsNull() {
+		return nil, 0, errors.New(fmt.Sprintf("chemical:join - nil or empty input. m0: %v m1: %v", m0, m1))
+	}
+	m0Ids := m0.Expand()
+	m1Ids := m1.Expand()
+	m := mol.NewMolecule(append(m0Ids, m1Ids...))
+	switch joiner {
+	case PolarJoiner:
+		m.PolarDecay()
+	case ForceJoiner:
+		m.EnergyDecay()
+	case LinkJoiner:
+		m.LinkDecay()
+	default:
+		logs.Error(fmt.Sprintf("chemical:join - joiner is default: %v", joiner))
+		m.LinkDecay()
+	}
+	return m, m0.Energy() + m1.Energy() - m.Energy(), nil
+}
+
+func PolarSplit(m *mol.Molecule) (*mol.Molecule, *mol.Molecule, int, error) {
+	mIds := elmt.PolarOrder(m.Expand())
+	sort.Sort(mIds)
+	if m0, m1, energy, e := split(elmt.SymbolList(mIds), m.Energy(), PolarSplitter); e != nil {
+		return nil, nil, 0, errors.New(fmt.Sprintf("chemical:SplitPolar - [%v]", e))
+	} else {
+		return m0, m1, energy, nil
+	}
+}
+
+func ForceSplit(m *mol.Molecule) (*mol.Molecule, *mol.Molecule, int, error) {
+	mIds := elmt.EnergyOrder(m.Expand())
+	sort.Sort(mIds)
+	if m0, m1, energy, e := split(elmt.SymbolList(mIds), m.Energy(), ForceSplitter); e != nil {
+		return nil, nil, 0, errors.New(fmt.Sprintf("chemical:SplitForce - [%v]", e))
+	} else {
+		return m0, m1, energy, nil
+	}
+}
+
+func LinkSplit(m *mol.Molecule) (*mol.Molecule, *mol.Molecule, int, error) {
+	mIds := elmt.LinksOrder(m.Expand())
+	sort.Sort(mIds)
+	if m0, m1, energy, e := split(elmt.SymbolList(mIds), m.Energy(), LinkSplitter); e != nil {
+		return nil, nil, 0, errors.New(fmt.Sprintf("chemical:SplitLinks - [%v]", e))
+	} else {
+		return m0, m1, energy, nil
+	}
+}
+
+func split(ids elmt.SymbolList, energy int, splitter reactIdx) (*mol.Molecule, *mol.Molecule, int, error) {
+	if len(ids) < mol.MinMoleculeElements*2 {
+		return nil, nil, 0, errors.New("chemical:split - molecule too short")
+	}
+	var m0Ids, m1Ids elmt.SymbolList
+	var val int
+	dispatcher := deliver()
+	for i := len(ids) - 1; i >= 0; i-- {
+		switch splitter {
+		case PolarSplitter:
+			val = int(elmt.Table(ids[i]).Polarity())
+		case ForceSplitter:
+			val = int(elmt.Table(ids[i]).Energy())
+		case LinkSplitter:
+			val = int(elmt.Table(ids[i]).Links())
+		default:
+			val = int(elmt.Table(ids[i]).Links())
+			logs.Error(fmt.Sprintf("chemical:split - splitter is default: %v", splitter))
+		}
+		if dispatcher(val) {
+			m0Ids = append(m0Ids, ids[i])
+		} else {
+			m1Ids = append(m1Ids, ids[i])
+		}
+
+	}
+	m0 := mol.NewMolecule(m0Ids)
+	m1 := mol.NewMolecule(m1Ids)
+	energy -= m0.Energy() + m1.Energy()
+	return m0, m1, energy, nil
+}
+
+func deliver() func(int) bool {
+	var left, right int
+	var flipflop bool
+	return func(delta int) bool {
+		if left < right {
+			if delta >= 0 {
+				left += delta
+				flipflop = false
+			} else {
+				right += delta
+				flipflop = true
+			}
+		} else if left > right {
+			if delta >= 0 {
+				right += delta
+				flipflop = true
+			} else {
+				left += delta
+				flipflop = false
+			}
+		} else {
+			if flipflop {
+				left += delta
+			} else {
+				right += delta
+			}
+			flipflop = !flipflop
+		}
+		return flipflop
+	}
+}
+
+func buildStepsChain(start, end, steps uint) ([]uint, error) {
+	if !chainExists(start, end, steps) {
+		return nil, errors.New("chemical:buildStepsChain - no path")
+	}
+	if steps == 1 {
+		return []uint{start, end}, nil
+	}
+	seq := make([]uint, steps+1)
+	seq[0] = start
+	seq[steps] = end
+	if err := stepsChainBuilder(seq); err != nil {
+		return nil, errors.New(fmt.Sprintf("chemical:buildStepsChainRec - %v\n%v\n", err, seq))
+	}
+	return seq[:], nil
+}
+
+func stepsChainBuilder(path []uint) error {
+	rnd := random.New()
+	for first, last := 0, len(path)-1; last-first > 2; first, last = first+1, last-1 {
+		if last-first == 3 {
+			// Check 2**2
+			if path[first] == 2 && path[last] == 2 {
+				path[first+1] = uint(rnd.Intn(2) + 3)
+				path[last-1] = uint(rnd.Intn(2) + 3)
+				break
+			}
+			// Check 1**1
+			if path[first] == 1 && path[last] == 1 {
+				var opt = [...]int{0, 3}
+				i := rnd.Intn(len(opt))
+				path[first+opt[i]] = uint(rnd.Intn(2) + 3)
+			}
+		}
+		if val, err := nextStep(path[first], path[last], uint(last-first-1)); err != nil {
+			return errors.New(fmt.Sprintf("chemical:stepsChainBuilder - %v", err))
+		} else {
+			path[first+1] = val
+		}
+		if val, err := nextStep(path[last], path[first+1], uint(last-first-2)); err != nil {
+			return errors.New(fmt.Sprintf("chemical:stepsChainBuilder - %v", err))
+		} else {
+			path[last-1] = val
+		}
+		// Check *22*
+		if last-first == 3 && path[first+1] == 2 && path[last-1] == 2 {
+			if path[first] != 1 {
+				path[first+1] = uint(rnd.Intn(2) + 3)
+			} else if path[last] != 1 {
+				path[last-1] = uint(rnd.Intn(2) + 3)
+			} else {
+				return errors.New(fmt.Sprintf("chemical:stepsChainBuilder - Check *22* failed [%v22%v]", path[0], path[3]))
+			}
+		}
+	}
+	if len(path)%2 == 1 {
+		center := len(path) / 2
+		// Check 2*1 & 1*2
+		if path[center-1]+path[center+1] == 3 {
+			path[center] = uint(rnd.Intn(2) + 3)
+			if path[center-1] == 1 {
+				path[center-1] = uint(rnd.Intn(2) + 3)
+			} else {
+				path[center+1] = uint(rnd.Intn(2) + 3)
+			}
+		} else {
+			if val, err := nextStep(path[center-1], path[center+1], 1); err != nil {
+				return errors.New(fmt.Sprintf("chemical:stepsChainBuilder - %v", err))
+			} else {
+				if val == 2 && (path[center-1] == 2 || path[center+1] == 2) {
+					val = uint(rnd.Intn(2) + 3)
+				}
+				path[center] = val
+			}
+		}
+	}
+	return nil
+}
+
+func chainExists(pointA, pointB, steps uint) bool {
+	if steps == 0 {
+		return false
+	}
+	if steps == 1 && pointA == pointB && (pointA == 1 || pointA == 2) {
+		return false
+	}
+	if steps == 2 && pointA+pointB == 3 {
+		return false
+	}
+	if steps == 3 && pointA == 1 && pointB == 1 {
+		return false
+	}
+	maxA, minA := calcMaxMin(pointA, steps)
+	maxB, minB := calcMaxMin(pointB, steps)
+	if pointB >= minA && pointB <= maxA && pointA >= minB && pointA <= maxB {
+		return true
+	}
+	return false
+}
+
+func calcMaxMin(point, dist uint) (max, min uint) {
+	factor := math.Exp2(float64(dist))
+	max = uint(float64(point) * factor)
+	min = uint(math.Max(1, math.Ceil(float64(point)/factor)))
+	return
+}
+
+func nextStep(start, end, dist uint) (uint, error) {
+	if dist == 0 {
+		return 0, errors.New("chemical:nextStep - no steps to do")
+	}
+	rnd := random.New()
+	startMax := 2 * start
+	startMin := uint(start/2 + start%2)
+	endMax, endMin := calcMaxMin(end, dist)
+	max := uint(math.Min(float64(startMax), float64(endMax)))
+	min := uint(math.Max(float64(startMin), float64(endMin)))
+	if max < min {
+		return 0, errors.New(fmt.Sprintf("chemical:nextStep - no path: %v -> %v (%v) [%v..%v]", start, end, dist, min, max))
+	}
+	val := min + uint(rnd.Intn(int(max-min)+1))
+	if start == 1 && val == 1 {
+		val++
+	} else if start == 2 && val == 2 {
+		var opt = [...]uint{3, 4}
+		i := rnd.Intn(len(opt))
+		val = opt[i]
+	}
+	return val, nil
+}
+
+func buildInputPhase(inputs uint) phase {
+	result := make(phase, int(inputs))
+	for _, v := range result {
+		v.value = *mol.NewEmptyMolecule()
+		v.minLen = mol.MinMoleculeElements
+		v.left = plug{idx: input, pin: 0}
+		v.right = plug{idx: novalue, pin: novalue}
+	}
+	return result
+}
+
+func completeOutputPhase(ph phase) {
+	for _, v := range ph {
+		v.right = plug{idx: output, pin: 0}
+	}
+}
+
+func buildStageSeed(inputs, outputs uint) (stageSeed, error) {
+	if inputs < 1 || outputs < 1 {
+		return nil, errors.New(fmt.Sprintf("chemical:buildStageSpec - invalid constraints: inputs = %v; outputs = v%", inputs, outputs))
+	}
+	result := make(stageSeed)
+	diff := uint(math.Abs(float64(inputs - outputs)))
+	if inputs > outputs {
+		result[class2t1] = diff
+		inputs -= 2 * diff
+		outputs -= diff
+	} else if inputs < outputs {
+		result[class1t2] = diff
+		inputs -= diff
+		outputs -= 2 * diff
+	}
+	// inputs == outputs
+	rnd := random.New()
+	remain := int(inputs)
+	for i := remain; i > 0; i /= 2 {
+		if int(rnd.Intn(10*remain)) < i {
+			result[class1t1]++
+			inputs--
+		}
+	}
+	result[class1t1] += inputs % 3
+	result[class1t2] += inputs / 3
+	result[class2t1] += inputs / 3
+	return result, nil
+}
+
+func buildStageSquema(seed stageSeed) (stageSquema, error) {
+	var proto []reactClass
+	var squema stageSquema
+	for idx, val := range seed {
+		if _, ok := classMap[idx]; ok {
+			for i := 0; i <= int(val); i++ {
+				proto = append(proto, idx)
+			}
+		} else {
+			return nil, errors.New("chemical:buildStageSquema - reactor id out of range")
+		}
+	}
+	rnd := random.New()
+	perm := rnd.Perm(len(proto))
+	for i := 0; i < len(proto); i++ {
+		if r, e := chooseReactor(proto[perm[i]]); e != nil {
+			squema = append(squema, r)
+		} else {
+			return nil, errors.New(fmt.Sprintf("chemical:buildStageSquema - error selecting reactor[%v]", e))
+		}
+	}
+	return squema, nil
+}
+
+func buildStage(inp phase, spec stageSeed) (stage, phase, error) {
+	if spec[class1t1]+spec[class1t2]+2*spec[class2t1] != uint(len(inp)) {
+		return nil, nil, errors.New(
+			fmt.Sprintf("chemical:buildStage - mismatch between len(inp)[%v] and calculated value from spec[%v]",
+				len(inp), spec[class1t1]+spec[class1t2]+2*spec[class2t1]))
+	}
+	//rnd := random.New()
+	//inpPerm := rnd.Perm(len(inp))
+	//outPerm := rnd.Perm(int(spec[class1t1] + 2*spec[class1t2] + spec[class2t1]))
+	//var inpPermIdx, outPermIdx int
+	var stg stage
+	for i := 0; i < int(spec[class1t1]); i++ {
+		//stg = append(stg, reactor{
+		//	id:  Connector,
+		//	inp: []plug{plug{idx: inpPerm[inpPermIdx], pin: 0}},
+		//	out: []plug{plug{idx: outPerm[outPermIdx], pin: 0}}})
+		//inpPermIdx++
+		//outPermIdx++
+	}
+	for i := 0; i < int(spec[class1t2]); i++ {
+		//stg = append(stg, reactor{
+		//	id:  class1t2,
+		//	inp: []plug{plug{idx: inpPerm[inpPermIdx], pin: 0}},
+		//	out: []plug{plug{idx: outPerm[outPermIdx], pin: 0}, plug{idx: outPerm[outPermIdx+1], pin: 0}}})
+		//inpPermIdx++
+		//outPermIdx = outPermIdx + 2
+	}
+	for i := 0; i < int(spec[class2t1]); i++ {
+		//stg = append(stg, reactor{
+		//	id:  class2t1,
+		//	inp: []plug{plug{idx: inpPerm[inpPermIdx], pin: 0}, plug{idx: inpPerm[inpPermIdx+1], pin: 0}},
+		//	out: []plug{plug{idx: outPerm[outPermIdx], pin: 0}}})
+		//inpPermIdx = inpPermIdx + 2
+		//outPermIdx++
+	}
+	var outPhase phase
+	for i := 0; i < len(stg); i++ {
+		for j := 0; j < len(stg[i].out); j++ {
+			outPhase = append(outPhase,
+				link{
+					left:   stg[i].out[j],
+					right:  plug{},
+					minLen: 2,
+					value:  *mol.NewEmptyMolecule(),
+				})
+		}
+	}
+	return stg, outPhase, nil
+}
+
+func chooseReactor(class reactClass) (reactIdx, error) {
+	if _, ok := classMap[class]; ok {
+		rnd := random.New()
+		switch class {
+		case class1t1:
+			return Connector, nil
+		case class1t2:
+			return splittersList[rnd.Intn(len(splittersList))], nil
+		case class2t1:
+			return joinersList[rnd.Intn(len(joinersList))], nil
+		default:
+			break
+		}
+	}
+	return novalue, errors.New("chemical:chooseReactr - unknown reactor class")
+}
+
+func buildMatrix(start, end, steps uint) (*matrix, error) {
+	if start == 0 {
+		return nil, errors.New("chemical:buildMatrix - zero inputs")
+	}
+	chain, err := buildStepsChain(start, end, steps)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("chemical:buildMatrix - %v", err))
+	}
+	result := &matrix{stages: nil, phases: nil}
+	result.phases = append(result.phases, buildInputPhase(start))
+	spec := make(stageSeed)
+	var st stage
+	var ph phase
+	for i := 1; i < len(chain); i++ {
+		if spec, err = buildStageSeed(chain[i-1], chain[i]); err != nil {
+			return nil, errors.New(fmt.Sprintf("chemical:buildMatrix - %v", err))
+		}
+		if st, ph, err = buildStage(result.phases[i-1], spec); err != nil {
+			return nil, errors.New(fmt.Sprintf("chemical:buildMatrix - %v", err))
+		}
+		result.phases = append(result.phases, ph)
+		result.stages = append(result.stages, st)
+	}
+	completeOutputPhase(result.phases[len(result.phases)-1])
+	return result, nil
+}
+
+func TestBuildStepsChain(in, st, out uint) ([]uint, error) {
+	return buildStepsChain(in, st, out)
+}
